@@ -1,0 +1,176 @@
+name: Build Android from ZIP
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'project.zip'
+      - 'build-target.txt'
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Check uploaded files
+        shell: bash
+        run: |
+          test -f project.zip || (echo "project.zip not found" && exit 1)
+          test -f build-target.txt || (echo "build-target.txt not found" && exit 1)
+
+      - name: Read build target
+        id: target
+        shell: bash
+        run: |
+          TARGET=$(tr -d '\r\n[:space:]' < build-target.txt)
+
+          case "$TARGET" in
+            debug|release|aab) ;;
+            *)
+              echo "Invalid target: $TARGET"
+              echo "Allowed: debug | release | aab"
+              exit 1
+              ;;
+          esac
+
+          echo "target=$TARGET" >> "$GITHUB_OUTPUT"
+          echo "Selected target: $TARGET"
+
+      - name: Unzip project
+        shell: bash
+        run: |
+          rm -rf project
+          mkdir project
+          unzip -q project.zip -d project
+
+          cd project
+
+          ITEMS=$(find . -mindepth 1 -maxdepth 1 | wc -l)
+          DIRS=$(find . -mindepth 1 -maxdepth 1 -type d | wc -l)
+
+          if [ "$ITEMS" -eq 1 ] && [ "$DIRS" -eq 1 ]; then
+            INNER_DIR=$(find . -mindepth 1 -maxdepth 1 -type d | head -n 1)
+            shopt -s dotglob
+            mv "$INNER_DIR"/* . 2>/dev/null || true
+            mv "$INNER_DIR"/.[!.]* . 2>/dev/null || true
+            rm -rf "$INNER_DIR"
+          fi
+
+          echo "Project root:"
+          ls -la
+
+      - name: Setup Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Setup Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Enable Corepack
+        run: corepack enable
+
+      - name: Install dependencies
+        working-directory: ./project
+        shell: bash
+        run: |
+          if [ -f yarn.lock ]; then
+            echo "Using Yarn"
+            yarn install --immutable || yarn install --frozen-lockfile || yarn install
+          elif [ -f package-lock.json ]; then
+            echo "Using npm"
+            npm ci || npm install
+          else
+            echo "Using npm install"
+            npm install
+          fi
+
+      - name: Generate android folder if needed
+        working-directory: ./project
+        shell: bash
+        run: |
+          if [ ! -d android ]; then
+            echo "android/ not found -> expo prebuild"
+            npx expo prebuild --platform android --non-interactive --clean
+          else
+            echo "android/ already exists"
+          fi
+
+      - name: Build APK Debug
+        if: steps.target.outputs.target == 'debug'
+        working-directory: ./project/android
+        run: |
+          chmod +x gradlew
+          ./gradlew assembleDebug --no-daemon
+
+      - name: Build APK Release
+        if: steps.target.outputs.target == 'release'
+        working-directory: ./project/android
+        run: |
+          chmod +x gradlew
+          ./gradlew assembleRelease --no-daemon
+
+      - name: Build AAB Release
+        if: steps.target.outputs.target == 'aab'
+        working-directory: ./project/android
+        run: |
+          chmod +x gradlew
+          ./gradlew bundleRelease --no-daemon
+
+      - name: Upload APK Debug
+        if: steps.target.outputs.target == 'debug'
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-apk-debug
+          path: ./project/android/app/build/outputs/apk/debug/*.apk
+          retention-days: 14
+          if-no-files-found: error
+
+      - name: Upload APK Release
+        if: steps.target.outputs.target == 'release'
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-apk-release
+          path: ./project/android/app/build/outputs/apk/release/*.apk
+          retention-days: 14
+          if-no-files-found: error
+
+      - name: Upload AAB Release
+        if: steps.target.outputs.target == 'aab'
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-aab-release
+          path: ./project/android/app/build/outputs/bundle/release/*.aab
+          retention-days: 14
+          if-no-files-found: error
+
+      - name: Cleanup runner
+        if: always()
+        run: |
+          rm -rf project
+
+      - name: Remove uploaded files from repository
+        if: always()
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git rm -f project.zip || true
+          git rm -f build-target.txt || true
+          git commit -m "cleanup: remove uploaded files [skip ci]" || echo "nothing to commit"
+          git push
