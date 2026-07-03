@@ -84,6 +84,9 @@ jobs:
       - name: Enable Corepack
         run: corepack enable
 
+      # ─────────────────────────────────────────────
+      # Определяем пакетный менеджер и lockfile
+      # ─────────────────────────────────────────────
       - name: Detect package manager
         id: pkg
         shell: bash
@@ -104,14 +107,21 @@ jobs:
             echo "Detected: npm (no lockfile)"
           fi
 
-      - name: Cache npm
+      # ─────────────────────────────────────────────
+      # Кэш: node_modules
+      # ─────────────────────────────────────────────
+      - name: Cache node_modules
+        id: cache-node
         uses: actions/cache@v4
         with:
-          path: ~/.npm
+          path: project/node_modules
           key: node-modules-${{ runner.os }}-${{ hashFiles(steps.pkg.outputs.lockfile) }}
           restore-keys: |
             node-modules-${{ runner.os }}-
 
+      # ─────────────────────────────────────────────
+      # Кэш: Gradle wrapper и зависимости
+      # ─────────────────────────────────────────────
       - name: Cache Gradle wrapper
         uses: actions/cache@v4
         with:
@@ -128,14 +138,22 @@ jobs:
           restore-keys: |
             gradle-caches-${{ runner.os }}-
 
+      # ─────────────────────────────────────────────
+      # Кэш: Android build cache
+      # ─────────────────────────────────────────────
       - name: Cache Android build
         uses: actions/cache@v4
         with:
-          path: ~/.android-build-cache
+          path: |
+            project/android/.gradle
+            project/android/app/.cxx
           key: android-build-${{ runner.os }}-${{ hashFiles('project/android/**/*.gradle*') }}
           restore-keys: |
             android-build-${{ runner.os }}-
 
+      # ─────────────────────────────────────────────
+      # Установка зависимостей
+      # ─────────────────────────────────────────────
       - name: Install dependencies
         working-directory: ./project
         shell: bash
@@ -145,12 +163,15 @@ jobs:
             yarn install --immutable || yarn install --frozen-lockfile || yarn install
           elif [ -f package-lock.json ]; then
             echo "Using npm ci"
-            npm ci --cache ~/.npm || npm install --cache ~/.npm
+            npm ci || npm install
           else
             echo "Using npm install"
-            npm install --cache ~/.npm
+            npm install
           fi
 
+      # ─────────────────────────────────────────────
+      # Генерация android/ если нужно
+      # ─────────────────────────────────────────────
       - name: Generate android folder if needed
         working-directory: ./project
         shell: bash
@@ -162,36 +183,33 @@ jobs:
             echo "android/ already exists"
           fi
 
+      # ─────────────────────────────────────────────
+      # Сборка
+      # ─────────────────────────────────────────────
       - name: Build APK Debug
         if: steps.target.outputs.target == 'debug'
         working-directory: ./project/android
         run: |
           chmod +x gradlew
-          ./gradlew assembleDebug \
-            --no-daemon \
-            --build-cache \
-            -Pandroid.buildCacheDir=$HOME/.android-build-cache
+          ./gradlew assembleDebug --no-daemon --build-cache
 
       - name: Build APK Release
         if: steps.target.outputs.target == 'release'
         working-directory: ./project/android
         run: |
           chmod +x gradlew
-          ./gradlew assembleRelease \
-            --no-daemon \
-            --build-cache \
-            -Pandroid.buildCacheDir=$HOME/.android-build-cache
+          ./gradlew assembleRelease --no-daemon --build-cache
 
       - name: Build AAB Release
         if: steps.target.outputs.target == 'aab'
         working-directory: ./project/android
         run: |
           chmod +x gradlew
-          ./gradlew bundleRelease \
-            --no-daemon \
-            --build-cache \
-            -Pandroid.buildCacheDir=$HOME/.android-build-cache
+          ./gradlew bundleRelease --no-daemon --build-cache
 
+      # ─────────────────────────────────────────────
+      # Загрузка артефактов
+      # ─────────────────────────────────────────────
       - name: Upload APK Debug
         if: steps.target.outputs.target == 'debug'
         uses: actions/upload-artifact@v4
@@ -219,6 +237,9 @@ jobs:
           retention-days: 14
           if-no-files-found: error
 
+      # ─────────────────────────────────────────────
+      # Очистка
+      # ─────────────────────────────────────────────
       - name: Cleanup runner
         if: always()
         run: |
