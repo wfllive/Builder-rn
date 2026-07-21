@@ -84,7 +84,9 @@ jobs:
       - name: Enable Corepack
         run: corepack enable
 
-      # TODO: Определяем пакетный менеджер и lockfile
+      # ─────────────────────────────────────────────
+      # Определяем пакетный менеджер и lockfile
+      # ─────────────────────────────────────────────
       - name: Detect package manager
         id: pkg
         shell: bash
@@ -105,7 +107,9 @@ jobs:
             echo "Detected: npm (no lockfile)"
           fi
 
-      # TODO: Установка зависимостей
+      # ─────────────────────────────────────────────
+      # Установка зависимостей
+      # ─────────────────────────────────────────────
       - name: Install dependencies
         working-directory: ./project
         shell: bash
@@ -121,7 +125,9 @@ jobs:
             npm install
           fi
 
-      # TODO: Генерация android/ если нужно
+      # ─────────────────────────────────────────────
+      # Генерация android/ если нужно
+      # ─────────────────────────────────────────────
       - name: Generate android folder if needed
         working-directory: ./project
         shell: bash
@@ -133,37 +139,33 @@ jobs:
             echo "android/ already exists"
           fi
 
-      # TODO: Очистка CMake кэша для решения ninja issue
-      - name: Clean CMake cache
-        working-directory: ./project/android
-        shell: bash
-        run: |
-          rm -rf app/.cxx
-          rm -rf build
-
-      # TODO: Сборка
+      # ─────────────────────────────────────────────
+      # Сборка
+      # ─────────────────────────────────────────────
       - name: Build APK Debug
         if: steps.target.outputs.target == 'debug'
         working-directory: ./project/android
         run: |
           chmod +x gradlew
-          ./gradlew clean assembleDebug --no-daemon --no-build-cache
+          ./gradlew assembleDebug --no-daemon
 
       - name: Build APK Release
         if: steps.target.outputs.target == 'release'
         working-directory: ./project/android
         run: |
           chmod +x gradlew
-          ./gradlew clean assembleRelease --no-daemon --no-build-cache
+          ./gradlew assembleRelease --no-daemon
 
       - name: Build AAB Release
         if: steps.target.outputs.target == 'aab'
         working-directory: ./project/android
         run: |
           chmod +x gradlew
-          ./gradlew clean bundleRelease --no-daemon --no-build-cache
+          ./gradlew bundleRelease --no-daemon
 
-      # TODO: Загрузка артефактов
+      # ─────────────────────────────────────────────
+      # Загрузка артефактов
+      # ─────────────────────────────────────────────
       - name: Upload APK Debug
         if: steps.target.outputs.target == 'debug'
         uses: actions/upload-artifact@v4
@@ -191,7 +193,9 @@ jobs:
           retention-days: 14
           if-no-files-found: error
 
-      # TODO: Очистка
+      # ─────────────────────────────────────────────
+      # Очистка
+      # ─────────────────────────────────────────────
       - name: Cleanup runner
         if: always()
         run: |
